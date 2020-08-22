@@ -3,7 +3,7 @@ package sct_test
 import (
 	"net/http"
 
-	"github.com/mberhault/go-sct"
+	"github.com/addigy/go-sct"
 )
 
 func ExampleCheckConnectionState() {
