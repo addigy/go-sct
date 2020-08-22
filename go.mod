@@ -1,4 +1,4 @@
-module github.com/mberhault/go-sct
+module github.com/addigy/go-sct
 
 go 1.15
 

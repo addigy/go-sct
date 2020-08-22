@@ -4,7 +4,7 @@ import (
 	"crypto/tls"
 	"log"
 
-	"github.com/mberhault/go-sct"
+	"github.com/addigy/go-sct"
 )
 
 func main() {
