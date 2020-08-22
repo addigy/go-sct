@@ -1,6 +1,6 @@
 # go-sct: Verifying Signed Certificate Timestamps in Go.
 
-[![GoDoc](https://godoc.org/github.com/mberhault/go-sct?status.svg)](https://godoc.org/github.com/mberhault/go-sct)
+[![GoDoc](https://godoc.org/github.com/addigy/go-sct?status.svg)](https://godoc.org/github.com/addigy/go-sct)
 
 Verify Signed Certificate Timestamps as defined in [RFC 6962](https://datatracker.ietf.org/doc/rfc6962/).
 
@@ -15,7 +15,7 @@ Perform Signed Certificate Timestamp verification for TLS connections.
 To install:
 
 ```
-go get github.com/mberhault/go-sct
+go get github.com/addigy/go-sct
 ```
 
 Using it to verify a simple https Get:
@@ -27,7 +27,7 @@ import (
   "log"
   "net/http"
 
-  "github.com/mberhault/go-sct"
+  "github.com/addigy/go-sct"
 )
 
 func main() {
