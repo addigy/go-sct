@@ -33,6 +33,7 @@ func (t *CertificateTransparencyTransport) RoundTrip(req *http.Request) (*http.R
 
 func (t *CertificateTransparencyTransport) getDefaultTransport() *http.Transport {
 	return &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
 		TLSClientConfig: &tls.Config{
 			VerifyConnection: func(state tls.ConnectionState) error {
 				return CheckConnectionState(&state, CheckerConfig{
