@@ -13,7 +13,7 @@ func ExampleCheckConnectionState() {
 		panic("get failed " + err.Error())
 	}
 
-	err = sct.CheckConnectionState(resp.TLS)
+	err = sct.CheckConnectionState(resp.TLS, sct.CheckerConfig{})
 	if err != nil {
 		panic("SCT check failed " + err.Error())
 	}

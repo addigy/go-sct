@@ -19,7 +19,12 @@ func main() {
 	defer conn.Close()
 
 	state := conn.ConnectionState()
-	err = sct.CheckConnectionState(&state)
+	err = sct.CheckConnectionState(&state, sct.CheckerConfig{
+		CacheCTLogListFilePath:       "/tmp/log_list.json",
+		CacheCTLogListSigFilePath:    "/tmp/log_list.sig",
+		CacheCTLogListPubKeyFilePath: "/tmp/log_list_pubkey.pem",
+		CacheValidSCTFilePath:        "/tmp/valid_scts_cache",
+	})
 	if err != nil {
 		log.Fatalf("failed SCT check: %v", err)
 	}

@@ -4,43 +4,102 @@ package sct
 
 import (
 	"context"
+	"crypto/md5"
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"sync"
-	"time"
-
 	ct "github.com/google/certificate-transparency-go"
 	"github.com/google/certificate-transparency-go/loglist2"
 	ctx509 "github.com/google/certificate-transparency-go/x509"
 	ctx509util "github.com/google/certificate-transparency-go/x509util"
+	"io/ioutil"
+	"log"
+	"os"
+	"strings"
+	"sync"
+	"time"
 )
 
 var (
-	defaultCheckerOnce sync.Once
-	defaultChecker     *checker
+	checkerCacheDuration = logCacheDuration
+	lastCheckerUpdate    time.Time
+	defaultCheckerLock   sync.Mutex
+	defaultChecker       *checker
+
+	validTimestampCachePopulateOnce sync.Once
+	validTimestampCacheLock         sync.RWMutex
+	validTimestampCache             = make(map[string]bool)
 )
 
 // checker performs SCT checks.
 type checker struct {
 	ll *loglist2.LogList
+	cc CheckerConfig
+}
+
+type CheckerConfig struct {
+	CacheCTLogListFilePath       string
+	CacheCTLogListSigFilePath    string
+	CacheCTLogListPubKeyFilePath string
+	CacheValidSCTFilePath        string
 }
 
 // getDefaultChecker returns the default Checker, initializing it if needed.
-func getDefaultChecker() *checker {
-	defaultCheckerOnce.Do(func() {
-		defaultChecker = &checker{
-			ll: newDefaultLogList(),
+func getDefaultChecker(cc CheckerConfig) *checker {
+	populateValidTimestampCache(cc.CacheValidSCTFilePath)
+	if isCheckerCacheExpired() {
+		defaultCheckerLock.Lock()
+		if isCheckerCacheExpired() {
+			defaultChecker = &checker {
+				ll: newDefaultLogList(LogListConfig{
+					CacheCTLogListFilePath:       cc.CacheCTLogListFilePath,
+					CacheCTLogListSigFilePath:    cc.CacheCTLogListSigFilePath,
+					CacheCTLogListPubKeyFilePath: cc.CacheCTLogListPubKeyFilePath,
+				}),
+				cc: cc,
+			}
+
+			lastCheckerUpdate = time.Now()
 		}
-	})
+
+		defaultCheckerLock.Unlock()
+	}
 
 	return defaultChecker
 }
 
+func populateValidTimestampCache(cacheValidSCTFilePath string) {
+	if cacheValidSCTFilePath == "" {
+		return
+	}
+
+	validTimestampCachePopulateOnce.Do(func() {
+		bts, err := ioutil.ReadFile(cacheValidSCTFilePath)
+		if err != nil {
+			log.Printf("could not read cacheValidSCTFile[%s]: %s", cacheValidSCTFilePath, err)
+			return
+		}
+
+		timestamps := strings.Split(string(bts), "\n")
+		for _, timestamp := range timestamps {
+			if timestamp == "" {
+				continue
+			}
+
+			validTimestampCache[timestamp] = true
+		}
+	})
+}
+
+func isCheckerCacheExpired() bool {
+	checkerCacheExpiration := lastCheckerUpdate.Add(checkerCacheDuration)
+	return time.Now().After(checkerCacheExpiration)
+}
+
 // CheckConnectionState examines SCTs (both embedded and in the TLS extension) and returns
 // nil if at least one of them is valid.
-func CheckConnectionState(state *tls.ConnectionState) error {
-	return getDefaultChecker().checkConnectionState(state)
+func CheckConnectionState(state *tls.ConnectionState, cc CheckerConfig) error {
+	return getDefaultChecker(cc).checkConnectionState(state)
 }
 
 func (c *checker) checkConnectionState(state *tls.ConnectionState) error {
@@ -130,6 +189,10 @@ func (c *checker) checkCertSCTs(chain []*ctx509.Certificate) error {
 }
 
 func (c *checker) checkOneSCT(x509SCT *ctx509.SerializedSCT, merkleLeaf *ct.MerkleTreeLeaf) error {
+	if c.isValidCacheHit(x509SCT) {
+		return nil
+	}
+
 	sct, err := ctx509util.ExtractSCT(x509SCT)
 	if err != nil {
 		return err
@@ -161,5 +224,34 @@ func (c *checker) checkOneSCT(x509SCT *ctx509.SerializedSCT, merkleLeaf *ct.Merk
 		return nil
 	}
 
+	c.setValidCache(x509SCT)
 	return nil
+}
+
+func (c *checker) isValidCacheHit(x509SCT *ctx509.SerializedSCT) bool {
+	validTimestampCacheKey := fmt.Sprintf("%x", md5.Sum(x509SCT.Val))
+	validTimestampCacheLock.RLock()
+	isValid := validTimestampCache[validTimestampCacheKey]
+	validTimestampCacheLock.RUnlock()
+	return isValid
+}
+
+func (c *checker) setValidCache(x509SCT *ctx509.SerializedSCT) {
+	validTimestampCacheKey := fmt.Sprintf("%x", md5.Sum(x509SCT.Val))
+	validTimestampCacheLock.Lock()
+	defer validTimestampCacheLock.Unlock()
+	validTimestampCache[validTimestampCacheKey] = true
+	if c.cc.CacheValidSCTFilePath != "" {
+		f, err := os.OpenFile(c.cc.CacheValidSCTFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			log.Printf("error opening cache file[%s]: %s", c.cc.CacheValidSCTFilePath, err)
+			return
+		}
+		_, err = f.WriteString(validTimestampCacheKey + "\n")
+		if err != nil {
+			log.Printf("error writing timestamp cache entry: %s", err)
+		}
+
+		_ = f.Close()
+	}
 }

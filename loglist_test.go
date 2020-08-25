@@ -9,7 +9,10 @@ var (
 )
 
 func TestNewLogListSigned(t *testing.T) {
-	ll := newLogListFromSources(testLogListPath, testLogListSigPath, testLogListPubKeyPath)
+	jsonData := getValidCacheOrLatest(testLogListPath, "", logCacheDuration)
+	sigData := getValidCacheOrLatest(testLogListSigPath, "", logCacheDuration)
+	pemData := getValidCacheOrLatest(testLogListPubKeyPath, "", logCacheDuration)
+	ll := newLogListFromSources(jsonData, sigData, pemData)
 	if ll == nil {
 		t.Fatal("returned log list is nil")
 	}

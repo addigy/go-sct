@@ -2,8 +2,10 @@ package sct
 
 import (
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	ct "github.com/google/certificate-transparency-go"
@@ -22,6 +24,7 @@ const (
 )
 
 var (
+	logCacheDuration = time.Hour * 24
 	qualifiedLogs = []loglist2.LogStatus{
 		loglist2.QualifiedLogStatus,
 		loglist2.UsableLogStatus,
@@ -29,29 +32,23 @@ var (
 	}
 )
 
-func newDefaultLogList() *loglist2.LogList {
-	return newLogListFromSources(logListURL, logListSigURL, logListPubKeyURL)
+type LogListConfig struct {
+	CacheCTLogListFilePath string
+	CacheCTLogListSigFilePath string
+	CacheCTLogListPubKeyFilePath string
 }
 
-func newLogListFromSources(listURL, listSigURL, listPubKeyURL string) *loglist2.LogList {
-	jsonData, err := ctx509util.ReadFileOrURL(listURL, http.DefaultClient)
-	if err != nil {
-		log.Fatalf("failed to fetch log list %s: %v", listURL, err)
-	}
+func newDefaultLogList(config LogListConfig) *loglist2.LogList {
+	jsonData := getValidCacheOrLatest(logListURL, config.CacheCTLogListFilePath, logCacheDuration)
+	sigData := getValidCacheOrLatest(logListSigURL, config.CacheCTLogListSigFilePath, logCacheDuration)
+	pemData := getValidCacheOrLatest(logListPubKeyURL, config.CacheCTLogListPubKeyFilePath, logCacheDuration)
+	return newLogListFromSources(jsonData, sigData, pemData)
+}
 
-	sigData, err := ctx509util.ReadFileOrURL(listSigURL, http.DefaultClient)
-	if err != nil {
-		log.Fatalf("failed to fetch log list signature %s: %v", listSigURL, err)
-	}
-
-	pemData, err := ctx509util.ReadFileOrURL(listPubKeyURL, http.DefaultClient)
-	if err != nil {
-		log.Fatalf("failed to fetch log list public key %s: %v", listPubKeyURL, err)
-	}
-
+func newLogListFromSources(jsonData []byte, sigData []byte, pemData []byte) *loglist2.LogList {
 	pubKey, _, _, err := ct.PublicKeyFromPEM(pemData)
 	if err != nil {
-		log.Fatalf("could not parse log list public key %s: %v", listPubKeyURL, err)
+		log.Fatalf("could not parse log list public key: %v", err)
 	}
 
 	ll, err := loglist2.NewFromSignedJSON(jsonData, sigData, pubKey)
@@ -93,4 +90,50 @@ func newLogInfoFromLog(ctLog *loglist2.Log) (*ctutil.LogInfo, error) {
 	}
 
 	return logInfo, nil
+}
+
+func getValidCacheOrLatest(originalSource string, cacheFilePath string, duration time.Duration) []byte {
+	var err error
+	var data []byte
+	isHit := isCacheHit(cacheFilePath, duration)
+	if isHit {
+		data, err = ctx509util.ReadFileOrURL(cacheFilePath, http.DefaultClient)
+		if err != nil {
+			log.Printf("failed to fetch cached file %s: %v", cacheFilePath, err)
+			_ = os.Remove(cacheFilePath)
+			isHit = false
+		}
+	}
+
+	if !isHit {
+		data, err = ctx509util.ReadFileOrURL(originalSource, http.DefaultClient)
+		if err != nil {
+			log.Fatalf("failed to fetch original source file %s: %v", originalSource, err)
+		}
+
+		if cacheFilePath != "" {
+			err = ioutil.WriteFile(cacheFilePath, data, 0755)
+			if err != nil {
+				log.Printf("failed to write cache file %s: %s", cacheFilePath, err)
+			}
+		}
+	}
+
+	return data
+}
+
+func isCacheHit(filePath string, duration time.Duration) bool {
+	if filePath == "" {
+		return false
+	}
+
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return false
+	}
+
+	modTime := info.ModTime()
+	cacheExpiration := modTime.Add(duration)
+	isHit := time.Now().Before(cacheExpiration)
+	return isHit
 }

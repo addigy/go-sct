@@ -17,7 +17,12 @@ func main() {
 		log.Fatalf("get failed for %s: %v", url, err)
 	}
 
-	err = sct.CheckConnectionState(resp.TLS)
+	err = sct.CheckConnectionState(resp.TLS, sct.CheckerConfig{
+		CacheCTLogListFilePath:       "/tmp/log_list.json",
+		CacheCTLogListSigFilePath:    "/tmp/log_list.sig",
+		CacheCTLogListPubKeyFilePath: "/tmp/log_list_pubkey.pem",
+		CacheValidSCTFilePath:        "/tmp/valid_scts_cache",
+	})
 	if err != nil {
 		log.Fatalf("failed SCT check: %v", err)
 	}
